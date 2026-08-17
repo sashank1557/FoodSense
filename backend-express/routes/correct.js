@@ -14,13 +14,15 @@ const {
   logCorrection,
   getAllCorrections,
   getCorrectionsCount,
-  updateMealHistoryItemsAndSummary
+  updateMealHistoryItemsAndSummary,
+  getDishById,
+  insertCustomDish
 } = require('../db/database');
 
 const router = express.Router();
 const FLASK_URL = process.env.FLASK_BACKEND_URL || 'http://127.0.0.1:5000';
 
-// 20 Validated Indian Food Classes
+// 20 Core ML-Trained Indian Food Classes
 const VALID_CLASSES = [
   'burger', 'butter_naan', 'chai', 'chapati', 'chole_bhature',
   'dal_makhani', 'dhokla', 'fried_rice', 'idli', 'jalebi',
@@ -41,41 +43,87 @@ router.post('/', analyzeLimiter, authOptional, async (req, res, next) => {
       correction_type = 'misclassified', // 'misclassified' or 'missed_item'
       item_bbox,
       bbox,
-      all_items
+      all_items,
+      custom_item
     } = req.body;
 
-    if (!meal_id || !corrected_label) {
+    if (!meal_id || (!corrected_label && !custom_item)) {
       return res.status(400).json({
         status: 'error',
         error: 'MISSING_FIELDS',
-        message: 'meal_id and corrected_label are required.'
-      });
-    }
-
-    const cleanCorrected = corrected_label.trim().toLowerCase().replace(/ /g, '_');
-    if (!VALID_CLASSES.includes(cleanCorrected)) {
-      return res.status(400).json({
-        status: 'error',
-        error: 'INVALID_CLASS',
-        message: `Class '${corrected_label}' is invalid. Must be one of: ${VALID_CLASSES.join(', ')}`
+        message: 'meal_id and corrected_label (or custom_item) are required.'
       });
     }
 
     const effectiveBbox = item_bbox || bbox || [40, 40, 600, 600];
-
-    // 1. Fetch updated nutrition and KNN alternative from Flask
     let itemInfo = null;
-    try {
-      const flaskRes = await axios.post(`${FLASK_URL}/lookup_item`, {
-        label: cleanCorrected
-      }, { timeout: 5000 });
-      itemInfo = flaskRes.data?.item;
-    } catch (flaskErr) {
-      console.warn('[Express Correct] Flask lookup error:', flaskErr.message);
-      return res.status(503).json({
+    let finalLabel = corrected_label ? corrected_label.trim().toLowerCase().replace(/ /g, '_') : 'custom_dish';
+
+    // Strategy 1: Core 20-class lookup from Flask Inference Engine
+    if (corrected_label && VALID_CLASSES.includes(finalLabel)) {
+      try {
+        const flaskRes = await axios.post(`${FLASK_URL}/lookup_item`, {
+          label: finalLabel
+        }, { timeout: 5000 });
+        itemInfo = flaskRes.data?.item;
+      } catch (flaskErr) {
+        console.warn('[Express Correct] Flask lookup error:', flaskErr.message);
+      }
+    }
+
+    // Strategy 2: Expanded 1500+ Indian dishes database lookup
+    if (!itemInfo && corrected_label) {
+      const dbDish = getDishById(corrected_label) || getDishById(finalLabel);
+      if (dbDish) {
+        finalLabel = dbDish.id || finalLabel;
+        itemInfo = {
+          label: dbDish.id,
+          display_name: dbDish.name,
+          confidence: 1.0,
+          portion: dbDish.standard_portion,
+          category: dbDish.category,
+          region: dbDish.region,
+          macros: {
+            calories: Number(dbDish.calories),
+            protein: Number(dbDish.protein),
+            carbs: Number(dbDish.carbs),
+            fat: Number(dbDish.fat),
+            fiber: Number(dbDish.fiber),
+            gi: Number(dbDish.gi)
+          },
+          healthy_alternative: null
+        };
+      }
+    }
+
+    // Strategy 3: User Custom Dish manual insertion
+    if (!itemInfo && custom_item) {
+      const saved = insertCustomDish(custom_item);
+      finalLabel = saved.id;
+      itemInfo = {
+        label: saved.id,
+        display_name: saved.name,
+        confidence: 1.0,
+        portion: saved.standard_portion,
+        category: saved.category,
+        region: saved.region,
+        macros: {
+          calories: Number(saved.calories),
+          protein: Number(saved.protein),
+          carbs: Number(saved.carbs),
+          fat: Number(saved.fat),
+          fiber: Number(saved.fiber),
+          gi: Number(saved.gi)
+        },
+        healthy_alternative: null
+      };
+    }
+
+    if (!itemInfo) {
+      return res.status(400).json({
         status: 'error',
-        error: 'INFERENCE_BACKEND_UNAVAILABLE',
-        message: 'Could not resolve corrected item nutrition from inference engine.'
+        error: 'INVALID_CLASS',
+        message: `Class '${corrected_label}' was not found in the 1500+ Indian dishes database.`
       });
     }
 
@@ -91,12 +139,12 @@ router.post('/', analyzeLimiter, authOptional, async (req, res, next) => {
       userId: req.user ? req.user.id : null,
       mealId: meal_id,
       originalLabel: original_label,
-      correctedLabel: cleanCorrected,
+      correctedLabel: finalLabel,
       correctionType: correction_type,
       itemBbox: effectiveBbox
     });
 
-    console.log(`[Express Correct] Logged ${correction_type} #${logged.id}: '${original_label}' -> '${cleanCorrected}' (User: ${req.user ? req.user.email : 'guest'})`);
+    console.log(`[Express Correct] Logged ${correction_type} #${logged.id}: '${original_label}' -> '${finalLabel}' (User: ${req.user ? req.user.email : 'guest'})`);
 
     // 3. If all_items provided, recalculate whole meal summary & update meal_history
     let updatedSummary = null;
@@ -168,8 +216,8 @@ router.post('/', analyzeLimiter, authOptional, async (req, res, next) => {
     return res.status(200).json({
       status: 'success',
       message: correction_type === 'missed_item'
-        ? `Added '${cleanCorrected}' to meal analysis.`
-        : `Item successfully corrected from '${original_label}' to '${cleanCorrected}'.`,
+        ? `Added '${finalLabel}' to meal analysis.`
+        : `Item successfully corrected from '${original_label}' to '${finalLabel}'.`,
       corrected_item: correctedItem,
       items: updatedItems.length > 0 ? updatedItems : undefined,
       meal_summary: updatedSummary,

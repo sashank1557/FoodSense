@@ -13,6 +13,7 @@ const analyzeRouter = require('./routes/analyze');
 const authRouter = require('./routes/auth');
 const historyRouter = require('./routes/history');
 const correctRouter = require('./routes/correct');
+const dishesRouter = require('./routes/dishes');
 const errorHandler = require('./middleware/errorHandler');
 const { generalLimiter } = require('./middleware/rateLimiter');
 
@@ -54,6 +55,8 @@ app.use('/api/history', historyRouter);
 
 app.use('/api/correct', correctRouter);
 app.use('/api/corrections', correctRouter);
+
+app.use('/api/dishes', dishesRouter);
 
 // Root informative endpoint
 app.get('/', (req, res) => {

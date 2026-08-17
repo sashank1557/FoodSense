@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import BoundingBoxCanvas from './BoundingBoxCanvas';
 import NutritionSummary from './NutritionSummary';
 import ItemDetailCard from './ItemDetailCard';
-import { RotateCcw, Sparkles, Layers, Clock, CheckCircle2, PlusCircle, X, Info } from 'lucide-react';
+import AddMissedDishCombobox from './AddMissedDishCombobox';
+import { RotateCcw, Sparkles, Layers, Clock, CheckCircle2, PlusCircle, ChevronDown, ChevronUp, Info } from 'lucide-react';
 import { submitMealCorrection } from '../services/api';
 
 const ALL_CLASSES = [
@@ -41,8 +42,8 @@ export default function ResultsScreen({
   const [currentSummary, setCurrentSummary] = useState({});
   const [toastMessage, setToastMessage] = useState(null);
   const [isAddingMissedItem, setIsAddingMissedItem] = useState(false);
-  const [missedItemClass, setMissedItemClass] = useState('masala_dosa');
   const [isSubmittingMissed, setIsSubmittingMissed] = useState(false);
+  const [showAllItems, setShowAllItems] = useState(false);
 
   // Initialize and normalize items when analysisData loads
   useEffect(() => {
@@ -117,38 +118,75 @@ export default function ResultsScreen({
     }
   };
 
-  // Handle adding a missed item
-  const handleAddMissedItem = async () => {
+  // Handle adding a dish selected from the 1500+ Indian dishes catalog or custom entry
+  const handleSelectCatalogDish = async (dish) => {
     setIsSubmittingMissed(true);
     try {
       const res = await submitMealCorrection({
-        meal_id: analysisData.meal_id || 'meal_active',
+        meal_id: analysisData?.meal_id || 'meal_active',
         original_label: 'unrecognized',
-        corrected_label: missedItemClass,
+        corrected_label: dish.id || dish.name,
         correction_type: 'missed_item',
         bbox: [40, 40, 600, 600],
         all_items: currentItems
       });
 
-      if (res.status === 'success' && res.corrected_item) {
-        const newItem = {
-          ...res.corrected_item,
-          item_id: `item_manual_${Date.now()}`,
-          is_manual_addition: true,
-          needs_confirmation: false
-        };
+      const newItem = {
+        item_id: `item_manual_${Date.now()}`,
+        label: dish.id || dish.name.toLowerCase().replace(/ /g, '_'),
+        display_name: dish.name,
+        category: dish.category,
+        region: dish.region,
+        confidence: 1.0,
+        portion: dish.standard_portion || '1 serving (150g)',
+        macros: {
+          calories: Number(dish.calories) || 200,
+          protein: Number(dish.protein) || 5,
+          carbs: Number(dish.carbs) || 25,
+          fat: Number(dish.fat) || 5,
+          fiber: Number(dish.fiber) || 2,
+          gi: Number(dish.gi) || 50
+        },
+        healthy_alternative: res?.corrected_item?.healthy_alternative || null,
+        bbox: [40, 40, 600, 600],
+        is_manual_addition: true,
+        needs_confirmation: false
+      };
 
-        setCurrentItems(prev => [...prev, newItem]);
-        if (res.meal_summary) {
-          setCurrentSummary(res.meal_summary);
-        }
-
-        setIsAddingMissedItem(false);
-        setToastMessage(`Added ${newItem.display_name} to meal analysis!`);
-        setTimeout(() => setToastMessage(null), 3500);
+      setCurrentItems(prev => [...prev, newItem]);
+      if (res?.meal_summary) {
+        setCurrentSummary(res.meal_summary);
       }
+      setIsAddingMissedItem(false);
+      setToastMessage(`Added ${dish.name} to meal analysis!`);
+      setTimeout(() => setToastMessage(null), 3500);
     } catch (err) {
-      alert('Could not add missed item: ' + err.message);
+      console.warn('Network correction fallback to client-side insertion:', err.message);
+      const newItem = {
+        item_id: `item_manual_${Date.now()}`,
+        label: dish.id || dish.name.toLowerCase().replace(/ /g, '_'),
+        display_name: dish.name,
+        category: dish.category,
+        region: dish.region,
+        confidence: 1.0,
+        portion: dish.standard_portion || '1 serving (150g)',
+        macros: {
+          calories: Number(dish.calories) || 200,
+          protein: Number(dish.protein) || 5,
+          carbs: Number(dish.carbs) || 25,
+          fat: Number(dish.fat) || 5,
+          fiber: Number(dish.fiber) || 2,
+          gi: Number(dish.gi) || 50
+        },
+        healthy_alternative: null,
+        bbox: [40, 40, 600, 600],
+        is_manual_addition: true,
+        needs_confirmation: false
+      };
+      setCurrentItems(prev => [...prev, newItem]);
+      setIsAddingMissedItem(false);
+      setToastMessage(`Added ${dish.name} to meal analysis!`);
+      setTimeout(() => setToastMessage(null), 3500);
     } finally {
       setIsSubmittingMissed(false);
     }
@@ -291,66 +329,12 @@ export default function ResultsScreen({
         </div>
       </div>
 
-      {/* Manual Missed Item Insertion Dialog */}
+      {/* Manual Missed Item Insertion Combobox from 1500+ Indian Dishes Catalog */}
       {isAddingMissedItem && (
-        <div style={{
-          background: '#eff6ff',
-          border: '1px solid #bfdbfe',
-          borderRadius: '12px',
-          padding: '1rem 1.25rem',
-          marginBottom: '1.5rem',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '0.75rem'
-        }}>
-          <div>
-            <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#1e40af', marginBottom: '0.2rem' }}>
-              Add an item missed by detection
-            </div>
-            <div style={{ fontSize: '0.78rem', color: '#3b82f6' }}>
-              Select a dish from our 20 supported Indian food classes to include in your meal analysis:
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <select
-              value={missedItemClass}
-              onChange={(e) => setMissedItemClass(e.target.value)}
-              style={{
-                padding: '0.45rem 0.75rem',
-                borderRadius: '8px',
-                border: '1px solid #93c5fd',
-                fontSize: '0.85rem',
-                fontWeight: 600,
-                background: '#ffffff'
-              }}
-            >
-              {ALL_CLASSES.map(cls => (
-                <option key={cls.id} value={cls.id}>
-                  {cls.name}
-                </option>
-              ))}
-            </select>
-
-            <button
-              onClick={handleAddMissedItem}
-              disabled={isSubmittingMissed}
-              className="btn btn-primary"
-              style={{ padding: '0.45rem 0.85rem', fontSize: '0.85rem' }}
-            >
-              {isSubmittingMissed ? 'Adding...' : 'Add Item'}
-            </button>
-
-            <button
-              onClick={() => setIsAddingMissedItem(false)}
-              style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px' }}
-            >
-              <X size={18} />
-            </button>
-          </div>
-        </div>
+        <AddMissedDishCombobox
+          onSelectDish={handleSelectCatalogDish}
+          onClose={() => setIsAddingMissedItem(false)}
+        />
       )}
 
       {/* Main Grid: Visuals & Item Cards */}
@@ -401,7 +385,7 @@ export default function ResultsScreen({
           }}>
             <Info size={14} color="#64748b" style={{ flexShrink: 0, marginTop: '2px' }} />
             <span>
-              <strong>Note on Condiments:</strong> Sambar, chutneys, and pickles are tracked as complementary side accompaniments. If you wish to calculate primary macros for a specific side dish, use <strong>"Add Missed Dish"</strong> above.
+              <strong>1500+ Indian Catalog:</strong> Use <strong>"Add Missed Dish"</strong> to search and log authentic regional dals, rotis, rice, sweets, chaats, or custom family recipes.
             </span>
           </div>
         </div>
@@ -419,7 +403,7 @@ export default function ResultsScreen({
             )}
           </div>
 
-          {currentItems.map((item) => (
+          {(showAllItems ? currentItems : currentItems.slice(0, 8)).map((item) => (
             <ItemDetailCard
               key={item.item_id}
               item={item}
@@ -433,6 +417,34 @@ export default function ResultsScreen({
               isSwapped={Boolean(swappedItems[item.item_id])}
             />
           ))}
+
+          {currentItems.length > 8 && (
+            <button
+              onClick={() => setShowAllItems(!showAllItems)}
+              className="btn btn-secondary"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.4rem',
+                padding: '0.6rem',
+                fontSize: '0.85rem',
+                fontWeight: 600
+              }}
+            >
+              {showAllItems ? (
+                <>
+                  <ChevronUp size={16} />
+                  <span>Show Fewer Items</span>
+                </>
+              ) : (
+                <>
+                  <ChevronDown size={16} />
+                  <span>Show All Detections (+{currentItems.length - 8} more)</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 

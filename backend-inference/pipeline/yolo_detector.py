@@ -44,10 +44,10 @@ class YOLOMealDetector:
       - Suggested Tier (0.05 <= conf < 0.14): Candidate regions flagged for user confirmation.
     """
 
-    def __init__(self, weights_path: Optional[str] = None, confidence_threshold: float = 0.05, iou_threshold: float = 0.45):
+    def __init__(self, weights_path: Optional[str] = None, confidence_threshold: float = 0.035, iou_threshold: float = 0.45):
         self.weights_path = weights_path or WEIGHTS_PATH
         self.confidence_threshold = confidence_threshold
-        self.high_conf_threshold = 0.14
+        self.high_conf_threshold = 0.12
         self.iou_threshold = iou_threshold
 
         if os.path.exists(self.weights_path):
@@ -62,6 +62,7 @@ class YOLOMealDetector:
         Locate food items in the image and extract bounding boxes.
         Returns a list of candidate regions with absolute coordinates [x1, y1, x2, y2]
         and confidence tier markings (confirmed vs needs_confirmation).
+        Features multi-dish region extraction for complex meal platters / thalis.
         """
         if image.mode != "RGB":
             image = image.convert("RGB")
@@ -71,6 +72,7 @@ class YOLOMealDetector:
 
         if self.model is not None:
             try:
+                # Run YOLO multi-scale detection
                 results = self.model.predict(
                     image,
                     conf=self.confidence_threshold,
@@ -124,6 +126,41 @@ class YOLOMealDetector:
                     })
             except Exception as e:
                 print(f"[YOLOMealDetector] Inference warning: {e}")
+
+        # Multi-dish platter handling: If only 1 large bounding box covers >65% of the frame,
+        # propose quadrant sub-regions to check for multiple dishes on the same thali/platter
+        if len(boxes_list) == 1 and (boxes_list[0]["width"] * boxes_list[0]["height"]) > (orig_w * orig_h * 0.65):
+            main_box = boxes_list[0]
+            bx1, by1, bx2, by2 = main_box["bbox_absolute"]
+            bw = bx2 - bx1
+            bh = by2 - by1
+            
+            # Quadrant sub-regions within the main platter
+            mid_x = bx1 + bw // 2
+            mid_y = by1 + bh // 2
+            sub_quads = [
+                ([bx1, by1, mid_x, mid_y], "top_left"),
+                ([mid_x, by1, bx2, mid_y], "top_right"),
+                ([bx1, mid_y, mid_x, by2], "bottom_left"),
+                ([mid_x, mid_y, bx2, by2], "bottom_right")
+            ]
+            
+            for (qx1, qy1, qx2, qy2), qname in sub_quads:
+                boxes_list.append({
+                    "item_id": f"item_sub_{qname}",
+                    "confidence": 0.35,
+                    "needs_confirmation": True,
+                    "confidence_tier": "suggested",
+                    "bbox_absolute": [qx1, qy1, qx2, qy2],
+                    "bbox_normalized": [
+                        round(qx1 / orig_w, 4),
+                        round(qy1 / orig_h, 4),
+                        round(qx2 / orig_w, 4),
+                        round(qy2 / orig_h, 4)
+                    ],
+                    "width": qx2 - qx1,
+                    "height": qy2 - qy1
+                })
 
         # Fallback to full frame if no items detected at all
         if not boxes_list:

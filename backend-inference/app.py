@@ -146,6 +146,7 @@ class PipelineManager:
         tot_fiber = 0.0
         gi_values = []
 
+        raw_classified = []
         for idx, box_info in enumerate(detected_boxes, 1):
             bbox = box_info.get("bbox_absolute") or box_info.get("bbox") or [0, 0, img_w, img_h]
             x1, y1, x2, y2 = bbox
@@ -163,8 +164,55 @@ class PipelineManager:
             pred_class = pred_res["class_id"]
             confidence = pred_res["confidence"]
 
-            # Step 3: Handle single-item image fallback if YOLO predicted full image
-            class_id = pred_class
+            raw_classified.append({
+                "box_info": box_info,
+                "bbox": bbox,
+                "class_id": pred_class,
+                "confidence": confidence
+            })
+
+        # Step 3: Spatial duplicate clustering — merge overlapping duplicate detections of the same dish
+        raw_classified.sort(key=lambda x: x["confidence"], reverse=True)
+        clustered = []
+        for cand in raw_classified:
+            b1 = cand["bbox"]
+            cls1 = cand["class_id"]
+            is_dup = False
+            for kept in clustered:
+                b2 = kept["bbox"]
+                cls2 = kept["class_id"]
+                if cls1 == cls2:
+                    # Compute IoU between same-class detections
+                    xA = max(b1[0], b2[0])
+                    yA = max(b1[1], b2[1])
+                    xB = min(b1[2], b2[2])
+                    yB = min(b1[3], b2[3])
+                    inter = max(0, xB - xA) * max(0, yB - yA)
+                    areaA = (b1[2] - b1[0]) * (b1[3] - b1[1])
+                    areaB = (b2[2] - b2[0]) * (b2[3] - b2[1])
+                    iou = inter / float(areaA + areaB - inter + 1e-6)
+                    if iou > 0.35:
+                        is_dup = True
+                        break
+            if not is_dup:
+                clustered.append(cand)
+
+        # Cap at 10 items max
+        final_candidates = clustered[:10]
+
+        items = []
+        tot_cal = 0.0
+        tot_protein = 0.0
+        tot_carbs = 0.0
+        tot_fat = 0.0
+        tot_fiber = 0.0
+        gi_values = []
+
+        for idx, entry in enumerate(final_candidates, 1):
+            class_id = entry["class_id"]
+            confidence = entry["confidence"]
+            bbox = entry["bbox"]
+            box_info = entry["box_info"]
 
             # Step 4: Lookup nutrition & Glycemic Index
             nut = self.nutrition_table.get(class_id, {})
@@ -204,6 +252,7 @@ class PipelineManager:
                 alt_obj = None
 
             items.append({
+                "item_id": f"item_{idx}",
                 "label": class_id,
                 "display_name": display_name,
                 "confidence": round(confidence, 4),

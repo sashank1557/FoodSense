@@ -193,3 +193,35 @@ export const fetchSupportedClasses = async () => {
     return null;
   }
 };
+
+/**
+ * 1500+ Indian Dishes Catalog & Search API
+ */
+export const searchDishes = async (query = '', { category = null, region = null, limit = 25, offset = 0 } = {}) => {
+  const params = { q: query, limit, offset };
+  if (category && category !== 'All') params.category = category;
+  if (region && region !== 'All') params.region = region;
+
+  const res = await apiClient.get('/dishes/search', { params });
+  return res.data;
+};
+
+export const fetchDishCategories = async () => {
+  try {
+    const res = await apiClient.get('/dishes/categories');
+    return res.data;
+  } catch (err) {
+    console.warn('Could not load dish categories:', err);
+    return { categories: [], regions: [], total_dishes: 0 };
+  }
+};
+
+export const fetchDishById = async (id) => {
+  const res = await apiClient.get(`/dishes/${id}`);
+  return res.data;
+};
+
+export const saveCustomDish = async (dishData) => {
+  const res = await apiClient.post('/dishes/custom', dishData);
+  return res.data;
+};
