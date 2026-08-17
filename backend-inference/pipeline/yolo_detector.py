@@ -43,10 +43,10 @@ class YOLOMealDetector:
     Zero synthetic or hallucinated grid boxes — all detections are strictly tied to real visual regions.
     """
 
-    def __init__(self, weights_path: Optional[str] = None, confidence_threshold: float = 0.20, iou_threshold: float = 0.40):
+    def __init__(self, weights_path: Optional[str] = None, confidence_threshold: float = 0.12, iou_threshold: float = 0.40):
         self.weights_path = weights_path or WEIGHTS_PATH
         self.confidence_threshold = confidence_threshold
-        self.high_conf_threshold = 0.40
+        self.high_conf_threshold = 0.35
         self.iou_threshold = iou_threshold
 
         if os.path.exists(self.weights_path):

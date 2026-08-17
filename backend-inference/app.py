@@ -164,15 +164,25 @@ class PipelineManager:
             crop_img = image.crop((x1_c, y1_c, x2_c, y2_c))
 
             # Step 2: Classify cropped region with MobileNetV2 CNN
-            pred_res = self.classifier.predict_crop(crop_img)
+            pred_res = self.classifier.predict_crop(crop_img, top_k=3)
             pred_class = pred_res["class_id"]
             cnn_conf = pred_res["confidence"]
             yolo_conf = box_info.get("confidence", 0.85)
 
-            # DISCARD LOW-CONFIDENCE SOFTMAX NOISE:
-            # Detections below 55% CNN confidence are discarded to prevent phantom guesses
-            if cnn_conf < 0.55:
-                print(f"[Inference Pipeline] Discarded low-confidence crop '{pred_class}' ({cnn_conf:.2%}) at {bbox}")
+            # Compute margin ratio between top-1 and top-2 class predictions
+            top_k = pred_res.get("top_k", [])
+            p1 = cnn_conf
+            p2 = top_k[1]["confidence"] if len(top_k) > 1 else 0.0
+            margin_ratio = p1 / (p2 + 1e-4)
+
+            # DYNAMIC MARGIN-BASED CONFIDENCE FILTERING:
+            # - Accept high confidence (>= 48%)
+            # - Accept moderate confidence (>= 32%) if top class has clear margin (>= 1.40x) over 2nd class
+            # - Discard flat/uniform softmax noise (e.g. 22% vs 20% vs 18%)
+            is_valid_detection = (p1 >= 0.48) or (p1 >= 0.32 and margin_ratio >= 1.40)
+
+            if not is_valid_detection:
+                print(f"[Inference Pipeline] Discarded low-margin crop '{pred_class}' ({cnn_conf:.2%}, margin: {margin_ratio:.2f}x) at {bbox}")
                 continue
 
             raw_classified.append({
@@ -216,8 +226,13 @@ class PipelineManager:
 
         # Fallback for simple single-dish photo if all crops were suppressed
         if not clustered:
-            full_pred = self.classifier.predict_crop(image)
-            if full_pred["confidence"] >= 0.50:
+            full_pred = self.classifier.predict_crop(image, top_k=3)
+            fp1 = full_pred["confidence"]
+            ftk = full_pred.get("top_k", [])
+            fp2 = ftk[1]["confidence"] if len(ftk) > 1 else 0.0
+            fmargin = fp1 / (fp2 + 1e-4)
+
+            if fp1 >= 0.45 or (fp1 >= 0.32 and fmargin >= 1.40):
                 clustered.append({
                     "box_info": {"confidence": 0.85, "needs_confirmation": False, "confidence_tier": "confirmed"},
                     "bbox": [0, 0, img_w, img_h],
