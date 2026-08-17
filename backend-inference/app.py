@@ -157,22 +157,36 @@ class PipelineManager:
             x2_c = max(x1_c + 1, min(x2, img_w))
             y2_c = max(y1_c + 1, min(y2, img_h))
 
+            # Skip trivial/empty box dimensions
+            if (x2_c - x1_c) < 20 or (y2_c - y1_c) < 20:
+                continue
+
             crop_img = image.crop((x1_c, y1_c, x2_c, y2_c))
 
             # Step 2: Classify cropped region with MobileNetV2 CNN
             pred_res = self.classifier.predict_crop(crop_img)
             pred_class = pred_res["class_id"]
-            confidence = pred_res["confidence"]
+            cnn_conf = pred_res["confidence"]
+            yolo_conf = box_info.get("confidence", 0.85)
+
+            # DISCARD LOW-CONFIDENCE SOFTMAX NOISE:
+            # Detections below 55% CNN confidence are discarded to prevent phantom guesses
+            if cnn_conf < 0.55:
+                print(f"[Inference Pipeline] Discarded low-confidence crop '{pred_class}' ({cnn_conf:.2%}) at {bbox}")
+                continue
 
             raw_classified.append({
                 "box_info": box_info,
                 "bbox": bbox,
                 "class_id": pred_class,
-                "confidence": confidence
+                "confidence": cnn_conf,
+                "yolo_conf": yolo_conf,
+                "combined_score": round(cnn_conf * 0.7 + yolo_conf * 0.3, 4)
             })
 
-        # Step 3: Spatial duplicate clustering — merge overlapping duplicate detections of the same dish
-        raw_classified.sort(key=lambda x: x["confidence"], reverse=True)
+        # Step 3: Strict Spatial NMS & Cross-Detection Deduplication
+        # Sort by combined score
+        raw_classified.sort(key=lambda x: x["combined_score"], reverse=True)
         clustered = []
         for cand in raw_classified:
             b1 = cand["bbox"]
@@ -181,24 +195,40 @@ class PipelineManager:
             for kept in clustered:
                 b2 = kept["bbox"]
                 cls2 = kept["class_id"]
-                if cls1 == cls2:
-                    # Compute IoU between same-class detections
-                    xA = max(b1[0], b2[0])
-                    yA = max(b1[1], b2[1])
-                    xB = min(b1[2], b2[2])
-                    yB = min(b1[3], b2[3])
-                    inter = max(0, xB - xA) * max(0, yB - yA)
-                    areaA = (b1[2] - b1[0]) * (b1[3] - b1[1])
-                    areaB = (b2[2] - b2[0]) * (b2[3] - b2[1])
-                    iou = inter / float(areaA + areaB - inter + 1e-6)
-                    if iou > 0.35:
-                        is_dup = True
-                        break
+                
+                # Compute IoU between bounding boxes
+                xA = max(b1[0], b2[0])
+                yA = max(b1[1], b2[1])
+                xB = min(b1[2], b2[2])
+                yB = min(b1[3], b2[3])
+                inter = max(0, xB - xA) * max(0, yB - yA)
+                areaA = (b1[2] - b1[0]) * (b1[3] - b1[1])
+                areaB = (b2[2] - b2[0]) * (b2[3] - b2[1])
+                iou = inter / float(areaA + areaB - inter + 1e-6)
+
+                # If same class with overlap > 0.30 OR different class with severe overlap > 0.45, suppress lower score
+                if (cls1 == cls2 and iou > 0.30) or (iou > 0.45):
+                    is_dup = True
+                    break
+
             if not is_dup:
                 clustered.append(cand)
 
-        # Cap at 10 items max
-        final_candidates = clustered[:10]
+        # Fallback for simple single-dish photo if all crops were suppressed
+        if not clustered:
+            full_pred = self.classifier.predict_crop(image)
+            if full_pred["confidence"] >= 0.50:
+                clustered.append({
+                    "box_info": {"confidence": 0.85, "needs_confirmation": False, "confidence_tier": "confirmed"},
+                    "bbox": [0, 0, img_w, img_h],
+                    "class_id": full_pred["class_id"],
+                    "confidence": full_pred["confidence"],
+                    "yolo_conf": 0.85,
+                    "combined_score": full_pred["confidence"]
+                })
+
+        # Cap at 8 highest-confidence distinct items
+        final_candidates = clustered[:8]
 
         items = []
         tot_cal = 0.0
@@ -256,8 +286,8 @@ class PipelineManager:
                 "label": class_id,
                 "display_name": display_name,
                 "confidence": round(confidence, 4),
-                "needs_confirmation": box_info.get("needs_confirmation", False),
-                "confidence_tier": box_info.get("confidence_tier", "confirmed"),
+                "needs_confirmation": False,
+                "confidence_tier": "confirmed",
                 "bbox": bbox,
                 "portion": portion,
                 "macros": {

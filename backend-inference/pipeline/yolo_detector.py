@@ -39,15 +39,14 @@ def compute_iou(boxA: List[float], boxB: List[float]) -> float:
 class YOLOMealDetector:
     """
     Food Item Localization Engine using fine-tuned YOLOv8n.
-    Implements a robust Two-Tier Confidence Strategy:
-      - Confirmed Tier (conf >= 0.14): High confidence detections.
-      - Suggested Tier (0.05 <= conf < 0.14): Candidate regions flagged for user confirmation.
+    Implements true object localization with Non-Maximum Suppression (NMS).
+    Zero synthetic or hallucinated grid boxes — all detections are strictly tied to real visual regions.
     """
 
-    def __init__(self, weights_path: Optional[str] = None, confidence_threshold: float = 0.035, iou_threshold: float = 0.45):
+    def __init__(self, weights_path: Optional[str] = None, confidence_threshold: float = 0.20, iou_threshold: float = 0.40):
         self.weights_path = weights_path or WEIGHTS_PATH
         self.confidence_threshold = confidence_threshold
-        self.high_conf_threshold = 0.12
+        self.high_conf_threshold = 0.40
         self.iou_threshold = iou_threshold
 
         if os.path.exists(self.weights_path):
@@ -59,10 +58,9 @@ class YOLOMealDetector:
 
     def detect_items(self, image: Image.Image) -> List[Dict[str, Any]]:
         """
-        Locate food items in the image and extract bounding boxes.
-        Returns a list of candidate regions with absolute coordinates [x1, y1, x2, y2]
-        and confidence tier markings (confirmed vs needs_confirmation).
-        Features multi-dish region extraction for complex meal platters / thalis.
+        Locate real food items in the image and extract bounding boxes.
+        Returns a list of candidate regions with absolute coordinates [x1, y1, x2, y2].
+        Applies Non-Maximum Suppression (NMS) to eliminate duplicate overlapping boxes on the same object.
         """
         if image.mode != "RGB":
             image = image.convert("RGB")
@@ -72,7 +70,7 @@ class YOLOMealDetector:
 
         if self.model is not None:
             try:
-                # Run YOLO multi-scale detection
+                # Run YOLO object detection with strict threshold and NMS
                 results = self.model.predict(
                     image,
                     conf=self.confidence_threshold,
@@ -87,13 +85,13 @@ class YOLOMealDetector:
                     conf = float(box.conf.cpu().numpy()[0])
                     raw_boxes.append((xyxy, conf))
 
-                # Apply IoU deduplication to eliminate overlapping candidate boxes
+                # Apply strict Non-Maximum Suppression (NMS) on bounding boxes
                 raw_boxes.sort(key=lambda x: x[1], reverse=True)
                 deduped = []
                 for b, conf in raw_boxes:
                     keep = True
                     for kept_b, _ in deduped:
-                        if compute_iou(b, kept_b) > 0.45:
+                        if compute_iou(b, kept_b) > self.iou_threshold:
                             keep = False
                             break
                     if keep:
@@ -127,42 +125,7 @@ class YOLOMealDetector:
             except Exception as e:
                 print(f"[YOLOMealDetector] Inference warning: {e}")
 
-        # Multi-dish platter handling: If only 1 large bounding box covers >65% of the frame,
-        # propose quadrant sub-regions to check for multiple dishes on the same thali/platter
-        if len(boxes_list) == 1 and (boxes_list[0]["width"] * boxes_list[0]["height"]) > (orig_w * orig_h * 0.65):
-            main_box = boxes_list[0]
-            bx1, by1, bx2, by2 = main_box["bbox_absolute"]
-            bw = bx2 - bx1
-            bh = by2 - by1
-            
-            # Quadrant sub-regions within the main platter
-            mid_x = bx1 + bw // 2
-            mid_y = by1 + bh // 2
-            sub_quads = [
-                ([bx1, by1, mid_x, mid_y], "top_left"),
-                ([mid_x, by1, bx2, mid_y], "top_right"),
-                ([bx1, mid_y, mid_x, by2], "bottom_left"),
-                ([mid_x, mid_y, bx2, by2], "bottom_right")
-            ]
-            
-            for (qx1, qy1, qx2, qy2), qname in sub_quads:
-                boxes_list.append({
-                    "item_id": f"item_sub_{qname}",
-                    "confidence": 0.35,
-                    "needs_confirmation": True,
-                    "confidence_tier": "suggested",
-                    "bbox_absolute": [qx1, qy1, qx2, qy2],
-                    "bbox_normalized": [
-                        round(qx1 / orig_w, 4),
-                        round(qy1 / orig_h, 4),
-                        round(qx2 / orig_w, 4),
-                        round(qy2 / orig_h, 4)
-                    ],
-                    "width": qx2 - qx1,
-                    "height": qy2 - qy1
-                })
-
-        # Fallback to full frame if no items detected at all
+        # Fallback to full frame if no items detected at all by YOLO
         if not boxes_list:
             boxes_list.append({
                 "item_id": "item_1",
@@ -176,3 +139,4 @@ class YOLOMealDetector:
             })
 
         return boxes_list
+
