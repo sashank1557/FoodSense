@@ -1,0 +1,64 @@
+# ==========================================
+# FoodSense .gitignore
+# ==========================================
+
+# Environments & Packages
+.venv/
+.venv*/
+venv/
+env/
+python_packages/
+pip_tmp/
+hf_cache/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Node & Frontend Build
+node_modules/
+backend-express/node_modules/
+frontend/node_modules/
+frontend/dist/
+.npm/
+
+# Local Environment Variables & Secrets
+.env
+.env.local
+.env.*.local
+*.env
+
+# SQLite Databases & Local Storage
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+backend-express/data/*.db*
+backend-express/foodsense.db*
+
+# Large Training Image Datasets & Raw Parquets
+# (Data summaries, class names, and nutrition tables remain tracked)
+data/train/
+data/train_224/
+data/test/
+data/test_224/
+data/yolo_dataset/
+data/raw_parquet/
+backend-inference/data/
+backend-inference/runs/
+runs/
+
+# Training artifacts & temporary images
+backend-inference/yolov8n.pt
+backend-inference/meal_analysis_output.jpg
+*.tmp
+
+# Operating System & IDE
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo

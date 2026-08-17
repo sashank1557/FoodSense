@@ -1,0 +1,21 @@
+{
+  "model_type": "YOLOv8n (Ultralytics)",
+  "model_size_mb": 5.93,
+  "input_resolution": [
+    640,
+    640
+  ],
+  "num_classes": 20,
+  "epochs": 5,
+  "metrics": {
+    "mAP50_pct": 10.96,
+    "mAP50_95_pct": 10.96,
+    "mean_precision_pct": 26.08,
+    "mean_recall_pct": 15.63
+  },
+  "nms_config": {
+    "conf_threshold": 0.25,
+    "iou_threshold": 0.45
+  },
+  "weights_path": "F:\\FoodSense\\backend-inference\\models\\weights\\food_detector_yolov8n.pt"
+}

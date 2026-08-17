@@ -1,0 +1,104 @@
+{
+  "architecture": "MobileNetV2 Transfer Learning",
+  "num_classes": 20,
+  "classes": [
+    "burger",
+    "butter_naan",
+    "chai",
+    "chapati",
+    "chole_bhature",
+    "dal_makhani",
+    "dhokla",
+    "fried_rice",
+    "idli",
+    "jalebi",
+    "kaathi_rolls",
+    "kadai_paneer",
+    "kulfi",
+    "masala_dosa",
+    "momos",
+    "paani_puri",
+    "pakode",
+    "pav_bhaji",
+    "pizza",
+    "samosa"
+  ],
+  "test_accuracy_pct": 85.55,
+  "total_test_samples": 941,
+  "preprocessing_pipeline": {
+    "resize_dimensions": [
+      224,
+      224
+    ],
+    "interpolation": "BILINEAR",
+    "channel_format": "RGB",
+    "tensor_range": [
+      0.0,
+      1.0
+    ],
+    "normalization_mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "normalization_std": [
+      0.229,
+      0.224,
+      0.225
+    ]
+  },
+  "weak_classes": [],
+  "top_confusions": [
+    {
+      "true_class": "butter_naan",
+      "predicted_class": "chapati",
+      "count": 13
+    },
+    {
+      "true_class": "chole_bhature",
+      "predicted_class": "chapati",
+      "count": 3
+    },
+    {
+      "true_class": "chole_bhature",
+      "predicted_class": "dal_makhani",
+      "count": 3
+    },
+    {
+      "true_class": "dal_makhani",
+      "predicted_class": "pav_bhaji",
+      "count": 3
+    },
+    {
+      "true_class": "dhokla",
+      "predicted_class": "fried_rice",
+      "count": 3
+    },
+    {
+      "true_class": "dhokla",
+      "predicted_class": "kulfi",
+      "count": 3
+    },
+    {
+      "true_class": "idli",
+      "predicted_class": "masala_dosa",
+      "count": 3
+    },
+    {
+      "true_class": "kaathi_rolls",
+      "predicted_class": "kadai_paneer",
+      "count": 3
+    },
+    {
+      "true_class": "kadai_paneer",
+      "predicted_class": "dal_makhani",
+      "count": 3
+    },
+    {
+      "true_class": "pav_bhaji",
+      "predicted_class": "dal_makhani",
+      "count": 3
+    }
+  ],
+  "weights_file": "F:\\FoodSense\\backend-inference\\models\\weights\\food_classifier_mobilenet_20class.pt"
+}
